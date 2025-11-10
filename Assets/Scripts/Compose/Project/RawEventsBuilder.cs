@@ -93,7 +93,7 @@ namespace ArcCreate.Compose.Project
 
                                 return 0;
 
-                            // Arc; compare by end time -> x0 -> y0 -> x1 -> y1 -> isTrace -> color -> sfx
+                            // Arc; compare by end time -> x0 -> y0 -> kind -> x1 -> y1 -> isTrace -> color -> sfx
                             case Arc:
                                 Arc aarc = a as Arc;
                                 Arc barc = b as Arc;
@@ -111,6 +111,11 @@ namespace ArcCreate.Compose.Project
                                 if(aarc.YStart != barc.YStart)
                                 {
                                     return aarc.YStart.CompareTo(barc.YStart);
+                                }
+
+                                if(aarc.LineType != barc.LineType)
+                                {
+                                    return aarc.LineType.CompareTo(barc.LineType);
                                 }
                                 
                                 if(aarc.XEnd != barc.XEnd)
