@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using ArcCreate.ChartFormat;
 using ArcCreate.Gameplay.Chart;
 using ArcCreate.Gameplay.Data;
+using UnityEngine;
 
 namespace ArcCreate.Compose.Project
 {
@@ -11,6 +13,8 @@ namespace ArcCreate.Compose.Project
         public List<(RawTimingGroup groups, IEnumerable<RawEvent> events)> GetEvents(string filterForFile = null, bool requireEditable = true)
         {
             List<(RawTimingGroup groups, IEnumerable<RawEvent> events)> list = new List<(RawTimingGroup groups, IEnumerable<RawEvent> events)>();
+            Dictionary<RawTimingGroup, TimingGroup> rawMap = new Dictionary<RawTimingGroup, TimingGroup>();
+
             foreach (TimingGroup tg in Services.Gameplay.Chart.TimingGroups)
             {
                 bool correctFile = filterForFile == null || tg.GroupProperties.FileName == filterForFile;
@@ -22,6 +26,7 @@ namespace ArcCreate.Compose.Project
                 }
 
                 RawTimingGroup rawprop = tg.GroupProperties.ToRaw();
+                rawMap.Add(rawprop, tg);
 
                 List<ArcEvent> events = new List<ArcEvent>();
                 events.AddRange(tg.GetEventType<Tap>());
@@ -38,24 +43,215 @@ namespace ArcCreate.Compose.Project
                 events.Sort(
                     (a, b) =>
                     {
-                        if (a is LongNote la && b is LongNote lb && a.Timing == b.Timing)
+                        // If timings differ, sort by timing
+                        if(a.Timing != b.Timing)
                         {
-                            return la.EndTiming.CompareTo(lb.EndTiming);
+                            return a.Timing.CompareTo(b.Timing);
                         }
 
-                        if (a is CameraEvent ca && b is CameraEvent cb && a.Timing == b.Timing)
+                        // Otherwise, if importance differs, sort by importance
+                        int atype = GetImportance(a);
+                        int btype = GetImportance(b);
+                        if(atype != btype)
                         {
-                            return ca.Duration.CompareTo(cb.Duration);
-                        }
-
-                        if (a.Timing == b.Timing)
-                        {
-                            int atype = GetImportance(a);
-                            int btype = GetImportance(b);
                             return atype.CompareTo(btype);
                         }
 
-                        return a.Timing.CompareTo(b.Timing);
+                        // Finally, compare directly
+                        switch(a)
+                        {
+                            // Timing events; cannot have two events at the same time, so always return 0
+                            case TimingEvent:
+                                return 0;
+                            
+                            // Tap; compare by lane
+                            case Tap:
+                                Tap atap = a as Tap;
+                                Tap btap = b as Tap;
+
+                                if(atap.Lane != btap.Lane)
+                                {
+                                    return atap.Lane.CompareTo(btap.Lane);
+                                }
+
+                                return 0;
+
+                            // Hold; compare by lane then end time
+                            case Hold:
+                                Hold ahold = a as Hold;
+                                Hold bhold = b as Hold;
+
+                                if(ahold.Lane != ahold.Lane)
+                                {
+                                    return ahold.Lane.CompareTo(ahold.Lane);
+                                }
+
+                                if(ahold.EndTiming != bhold.EndTiming)
+                                {
+                                    return ahold.EndTiming.CompareTo(bhold.EndTiming);
+                                }
+
+                                return 0;
+
+                            // Arc; compare by end time -> x0 -> y0 -> x1 -> y1 -> isTrace -> color -> sfx
+                            case Arc:
+                                Arc aarc = a as Arc;
+                                Arc barc = b as Arc;
+
+                                if(aarc.EndTiming != barc.EndTiming)
+                                {
+                                    return aarc.EndTiming.CompareTo(barc.EndTiming);
+                                }
+
+                                if(aarc.XStart != barc.XStart)
+                                {
+                                    return aarc.XStart.CompareTo(barc.XStart);
+                                }
+                                
+                                if(aarc.YStart != barc.YStart)
+                                {
+                                    return aarc.YStart.CompareTo(barc.YStart);
+                                }
+                                
+                                if(aarc.XEnd != barc.XEnd)
+                                {
+                                    return aarc.XEnd.CompareTo(barc.XEnd);
+                                }
+                                
+                                if(aarc.YEnd != barc.YEnd)
+                                {
+                                    return aarc.YEnd.CompareTo(barc.YEnd);
+                                }
+
+                                if(aarc.IsTrace != barc.IsTrace)
+                                {
+                                    return aarc.IsTrace.CompareTo(barc.IsTrace);
+                                }
+
+                                if(aarc.Color != barc.Color)
+                                {
+                                    return aarc.Color.CompareTo(barc.Color);
+                                }
+
+                                if(aarc.Sfx != barc.Sfx)
+                                {
+                                    return aarc.Sfx.CompareTo(barc.Sfx);
+                                }
+
+                                return 0;
+
+                            // Camera event; sort by duration -> type -> move -> rotate
+                            case CameraEvent:
+                                CameraEvent acam = a as CameraEvent;
+                                CameraEvent bcam = b as CameraEvent;
+
+                                if(acam.Duration != bcam.Duration)
+                                {
+                                    return acam.Duration.CompareTo(bcam.Duration);
+                                }
+
+                                if(acam.CameraType != bcam.CameraType)
+                                {
+                                    return acam.CameraType.CompareTo(bcam.CameraType);
+                                }
+
+                                if(!acam.Move.Equals(bcam.Move))
+                                {
+                                    return CompareVec3(acam.Move, bcam.Move);
+                                }
+
+                                if(!acam.Rotate.Equals(bcam.Rotate))
+                                {
+                                    return CompareVec3(acam.Rotate, bcam.Rotate);
+                                }
+
+                                return 0;
+
+                            // Scenecontrol event; sort by type then arguments in order
+                            case ScenecontrolEvent:
+                                ScenecontrolEvent ascene = a as ScenecontrolEvent;
+                                ScenecontrolEvent bscene = b as ScenecontrolEvent;
+
+                                if(ascene.Typename != bscene.Typename)
+                                {
+                                    return ascene.Typename.CompareTo(bscene.Typename);
+                                }
+
+                                if(ascene.Arguments.Count != bscene.Arguments.Count)
+                                {
+                                    return ascene.Arguments.Count.CompareTo(bscene.Arguments.Count);
+                                }
+
+                                for(int i = 0; i < ascene.Arguments.Count; i++)
+                                {
+                                    object aarg = ascene.Arguments[i];
+                                    object barg = bscene.Arguments[i];
+
+                                    int aargimp = GetScenecontrolArgImportance(aarg);
+                                    int bargimp = GetScenecontrolArgImportance(barg);
+
+                                    if(aargimp != bargimp)
+                                    {
+                                        return aargimp.CompareTo(bargimp);
+                                    }
+
+                                    switch(aarg)
+                                    {
+                                        case float:
+                                            float afloat = (float)aarg;
+                                            float bfloat = (float)barg;
+
+                                            if(afloat != bfloat)
+                                            {
+                                                return afloat.CompareTo(bfloat);
+                                            }
+                                            break;
+
+                                        case string:
+                                            string astr = (string)aarg;
+                                            string bstr = (string)barg;
+
+                                            if(astr != bstr)
+                                            {
+                                                return astr.CompareTo(bstr);
+                                            }
+                                            break;
+
+                                        // Note: other argument types are not currently possible,
+                                        // so they will be treated as though they are equivalent
+                                    }
+                                }
+
+                                return 0;
+
+                            // Include event -> sort by file
+                            case IncludeEvent:
+                                IncludeEvent aincl = a as IncludeEvent;
+                                IncludeEvent bincl = b as IncludeEvent;
+
+                                if(aincl.File != bincl.File)
+                                {
+                                    return aincl.File.CompareTo(bincl.File);
+                                }
+
+                                return 0;
+
+                            // Fragment event -> sort by file
+                            case FragmentEvent:
+                                FragmentEvent afrag = a as FragmentEvent;
+                                FragmentEvent bfrag = b as FragmentEvent;
+
+                                if(afrag.File != bfrag.File)
+                                {
+                                    return afrag.File.CompareTo(bfrag.File);
+                                }
+
+                                return 0;
+
+                            // Default; throw a not supported exception to fail fast
+                            default:
+                                throw new NotSupportedException();
+                        }
                     });
 
                 IEnumerable<RawEvent> rawevents = events.Select<ArcEvent, RawEvent>(
@@ -93,6 +289,8 @@ namespace ArcCreate.Compose.Project
                                 var ats = Services.Gameplay.Chart
                                     .GetAll<ArcTap>()
                                     .Where(at => at.Arc == arc)
+                                    .OrderBy(at => at.Timing)
+                                    .ThenBy(at => at.Width)
                                     .Select(at => new RawArcTap
                                     {
                                         Type = RawEventType.ArcTap,
@@ -160,7 +358,42 @@ namespace ArcCreate.Compose.Project
                 list.Add((rawprop, rawevents));
             }
 
+            // Sort by timing group id number
+            list.Sort((a, b) => rawMap[a.groups].GroupNumber.CompareTo(rawMap[b.groups].GroupNumber));
             return list;
+        }
+
+        private int CompareVec3(Vector3 a, Vector3 b)
+        {
+            if(a.x != b.x)
+            {
+                return a.x.CompareTo(b.x);
+            }
+
+            if(a.y != b.y)
+            {
+                return a.y.CompareTo(b.y);
+            }
+
+            if(a.z != b.z)
+            {
+                return a.z.CompareTo(b.z);
+            }
+
+            return 0;
+        }
+
+        private int GetScenecontrolArgImportance(object o)
+        {
+            switch(o)
+            {
+                case float:
+                    return 0;
+                case string:
+                    return 1;
+                default:
+                    return 2;
+            }
         }
 
         private int GetImportance(ArcEvent a)
